@@ -1,3 +1,7 @@
+## JAX-MNIST
+
+Code cloned from https://github.com/google/flax/tree/main/examples/mnist
+
 ## MNIST classification
 
 Trains a simple convolutional network on the MNIST dataset.
