@@ -1,6 +1,8 @@
 ## JAX-MNIST
 
-Code cloned from https://github.com/google/flax/tree/main/examples/mnist
+Code cloned from: https://github.com/google/flax/tree/main/examples/mnist.
+Basically this repo is just being used to learn JAX / Flax.
+
 
 ## MNIST classification
 

@@ -22,145 +22,191 @@ The data is loaded using tensorflow_datasets.
 # pytype: disable=wrong-keyword-args
 
 from absl import logging
-from flax import linen as nn
-from flax.metrics import tensorboard
+from clu import metric_writers
+from flax import nnx
 from flax.training import train_state
-import jax
-import jax.numpy as jnp
-import ml_collections
-import numpy as np
-import optax
+import tensorflow as tf
 import tensorflow_datasets as tfds
+import ml_collections
+import optax
+
+from input_pipeline import create_split
+from models import CNN
 
 
-class CNN(nn.Module):
-  """A simple CNN model."""
-
-  @nn.compact
-  def __call__(self, x):
-    x = nn.Conv(features=32, kernel_size=(3, 3))(x)
-    x = nn.relu(x)
-    x = nn.avg_pool(x, window_shape=(2, 2), strides=(2, 2))
-    x = nn.Conv(features=64, kernel_size=(3, 3))(x)
-    x = nn.relu(x)
-    x = nn.avg_pool(x, window_shape=(2, 2), strides=(2, 2))
-    x = x.reshape((x.shape[0], -1))  # flatten
-    x = nn.Dense(features=256)(x)
-    x = nn.relu(x)
-    x = nn.Dense(features=10)(x)
-    return x
+NUM_CLASSES = 10
 
 
-@jax.jit
-def apply_model(state, images, labels):
-  """Computes gradients, loss and accuracy for a single batch."""
+def create_train_state(model, rngs, config):
+    """Creates initial `TrainState`."""
 
-  def loss_fn(params):
-    logits = state.apply_fn({'params': params}, images)
-    one_hot = jax.nn.one_hot(labels, 10)
-    loss = jnp.mean(optax.softmax_cross_entropy(logits=logits, labels=one_hot))
-    return loss, logits
+    graphdef, params = nnx.split(model, nnx.Param)
+    tx = optax.sgd(config.learning_rate, config.momentum)
 
-  grad_fn = jax.value_and_grad(loss_fn, has_aux=True)
-  (loss, logits), grads = grad_fn(state.params)
-  accuracy = jnp.mean(jnp.argmax(logits, -1) == labels)
-  return grads, loss, accuracy
+    return train_state.TrainState.create(
+        apply_fn=graphdef.apply,
+        params=params,
+        tx=tx,
+    )
 
 
-@jax.jit
-def update_model(state, grads):
-  return state.apply_gradients(grads=grads)
+@nnx.jit
+def train_step(state: train_state.TrainState, metrics: nnx.MultiMetric, batch):
+    inputs = batch["image"]
+    labels = batch["label"]
+
+    def loss_fn(params):
+        logits, (graphdef, new_state) = state.apply_fn(params)(inputs)
+        loss = optax.softmax_cross_entropy_with_integer_labels(
+            logits, labels
+        ).mean()
+        return loss, logits
+
+    grad_fn = nnx.value_and_grad(loss_fn, has_aux=True)
+    (loss, logits), grads = grad_fn(state.params)
+
+    metrics.update(loss=loss, logits=logits, labels=labels)
+    state = state.apply_gradients(grads=grads)
+
+    return state, metrics
 
 
-def train_epoch(state, train_ds, batch_size, rng):
-  """Train for a single epoch."""
-  train_ds_size = len(train_ds['image'])
-  steps_per_epoch = train_ds_size // batch_size
+@nnx.jit
+def val_step(state: train_state.TrainState, metrics: nnx.MultiMetric, batch):
+    inputs = batch["image"]
+    labels = batch["label"]
 
-  perms = jax.random.permutation(rng, len(train_ds['image']))
-  perms = perms[: steps_per_epoch * batch_size]  # skip incomplete batch
-  perms = perms.reshape((steps_per_epoch, batch_size))
+    logits, _ = state.apply_fn(state.params)(inputs)
+    loss = optax.softmax_cross_entropy_with_integer_labels(
+        logits, labels
+    ).mean()
 
-  epoch_loss = []
-  epoch_accuracy = []
-
-  for perm in perms:
-    batch_images = train_ds['image'][perm, ...]
-    batch_labels = train_ds['label'][perm, ...]
-    grads, loss, accuracy = apply_model(state, batch_images, batch_labels)
-    state = update_model(state, grads)
-    epoch_loss.append(loss)
-    epoch_accuracy.append(accuracy)
-  train_loss = np.mean(epoch_loss)
-  train_accuracy = np.mean(epoch_accuracy)
-  return state, train_loss, train_accuracy
+    metrics.update(loss=loss, logits=logits, labels=labels)
+    return metrics
 
 
-def get_datasets():
-  """Load MNIST train and test datasets into memory."""
-  ds_builder = tfds.builder('mnist')
-  ds_builder.download_and_prepare()
-  train_ds = tfds.as_numpy(ds_builder.as_dataset(split='train', batch_size=-1))
-  test_ds = tfds.as_numpy(ds_builder.as_dataset(split='test', batch_size=-1))
-  train_ds['image'] = jnp.float32(train_ds['image']) / 255.0
-  test_ds['image'] = jnp.float32(test_ds['image']) / 255.0
-  return train_ds, test_ds
+def log_summary(summary):
 
+    # Info record
+    logging.info(
+        (
+            "[train] ",
+            f"epoch: {summary['epoch']}, "
+            f"step: {summary['step']}, "
+            f"loss: {summary['train_loss']}, "
+            f"accuracy: {summary['train_accuracy']}",
+        )
+    )
 
-def create_train_state(rng, config):
-  """Creates initial `TrainState`."""
-  cnn = CNN()
-  params = cnn.init(rng, jnp.ones([1, 28, 28, 1]))['params']
-  tx = optax.sgd(config.learning_rate, config.momentum)
-  return train_state.TrainState.create(apply_fn=cnn.apply, params=params, tx=tx)
+    logging.info(
+        (
+            "[val] ",
+            f"epoch: {summary['epoch']}, "
+            f"step: {summary['step']}, "
+            f"loss: {summary['val_loss']}, "
+            f"accuracy: {summary['val_accuracy']}",
+        )
+    )
 
 
 def train_and_evaluate(
     config: ml_collections.ConfigDict, workdir: str
 ) -> train_state.TrainState:
-  """Execute model training and evaluation loop.
+    """Execute model training and evaluation loop.
 
-  Args:
-    config: Hyperparameter configuration for training and evaluation.
-    workdir: Directory where the tensorboard summaries are written to.
+    Args:
+      config: Hyperparameter configuration for training and evaluation.
+      workdir: Directory where the tensorboard summaries are written to.
 
-  Returns:
-    The train state (which includes the `.params`).
-  """
-  train_ds, test_ds = get_datasets()
-  rng = jax.random.key(0)
+    Returns:
+      The train state (which includes the `.params`).
+    """
+    ###########################################################################
 
-  summary_writer = tensorboard.SummaryWriter(workdir)
-  summary_writer.hparams(dict(config))
+    tf.random.set_seed(0)
 
-  rng, init_rng = jax.random.split(rng)
-  state = create_train_state(init_rng, config)
+    ###########################################################################
 
-  for epoch in range(1, config.num_epochs + 1):
-    rng, input_rng = jax.random.split(rng)
-    state, train_loss, train_accuracy = train_epoch(
-        state, train_ds, config.batch_size, input_rng
+    dataset_builder = tfds.builder(config.dataset)
+    train_split = create_split(
+        dataset_builder,
+        ds_part="train",
+        train_val_perc=config.train_val_perc,
+        batch_size=config.batch_size,
+        cache=config.cache,
+        shuffle_buffer_size=config.shuffle_buffer_size,
     )
-    _, test_loss, test_accuracy = apply_model(
-        state, test_ds['image'], test_ds['label']
-    )
-
-    logging.info(
-        'epoch:% 3d, train_loss: %.4f, train_accuracy: %.2f, test_loss: %.4f,'
-        ' test_accuracy: %.2f'
-        % (
-            epoch,
-            train_loss,
-            train_accuracy * 100,
-            test_loss,
-            test_accuracy * 100,
-        )
+    val_split = create_split(
+        dataset_builder,
+        ds_part="val",
+        train_val_perc=config.train_val_perc,
+        batch_size=config.batch_size,
+        cache=config.cache,
+        shuffle_buffer_size=None,
     )
 
-    summary_writer.scalar('train_loss', train_loss, epoch)
-    summary_writer.scalar('train_accuracy', train_accuracy, epoch)
-    summary_writer.scalar('test_loss', test_loss, epoch)
-    summary_writer.scalar('test_accuracy', test_accuracy, epoch)
+    ###########################################################################
+    # Calculate number of steps for each of these
+    train_ds = train_split.ds
+    val_ds = val_split.ds
 
-  summary_writer.flush()
-  return state
+    train_steps_per_epoch = (
+        train_split.num_examples_per_epoch // config.batch_size
+    )
+    num_train_steps = config.num_epochs * train_steps_per_epoch
+    num_val_steps = val_split.num_examples_per_epoch // config.batch_size
+
+    ###########################################################################
+
+    model = CNN(rngs=nnx.Rngs(0))
+    state = create_train_state(model, rngs=nnx.Rngs(0), config=config)
+
+    ###########################################################################
+
+    metrics = nnx.MultiMetric(
+        accuracy=nnx.metrics.Accuracy(),
+        loss=nnx.metrics.Average("loss"),
+    )
+    writer = metric_writers.create_default_writer(workdir)
+
+    ###########################################################################
+
+    for step, batch in zip(
+        range(num_train_steps), train_ds.as_numpy_iterator()
+    ):
+
+        # Train step
+        state, metrics = train_step(state, metrics, batch)
+
+        # Check for logging
+        if (step % config.log_every_steps == 0) or (
+            step == num_train_steps - 1
+        ):
+            epoch = step // train_steps_per_epoch
+            summary = {"epoch": epoch, "step": step}
+
+            # Process train stats
+            for metric, value in metrics.compute().items():
+                summary[f"train_{metric}"] = value
+            metrics.reset()
+
+            # Process val stats
+            for _, val_batch in zip(
+                range(num_val_steps), val_ds.as_numpy_iterator()
+            ):
+                metrics = val_step(state, metrics, val_batch)
+
+            for metric, value in metrics.compute().items():
+                summary[f"val_{metric}"] = value
+            metrics.reset()
+
+            # Record data into writer
+            writer.write_scalars(step, summary)
+            writer.flush()
+
+            # Info record
+            log_summary(summary)
+
+    ###########################################################################
+
+    return state
