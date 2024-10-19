@@ -66,15 +66,16 @@ def create_split(
     ].num_examples
 
     ds = dataset_builder.as_dataset(split=split_str)
+    ds = ds.map(_process, tf.data.AUTOTUNE)
 
     if cache:
         ds = ds.cache()
+        ds = ds.take(num_examples_per_epoch)
 
     if ds_part == DatasetPart.train:
         ds = ds.repeat()
         ds = ds.shuffle(shuffle_buffer_size)
 
-    ds = ds.map(_process, tf.data.AUTOTUNE)
     ds = ds.batch(batch_size, drop_remainder=True)
 
     if ds_part != DatasetPart.train:
