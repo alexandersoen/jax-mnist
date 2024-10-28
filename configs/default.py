@@ -14,27 +14,37 @@
 
 """Default Hyperparameter configuration."""
 
-import ml_collections
+import dataclasses
 
 
-def get_config():
-    """Get the default hyperparameter configuration."""
-    config = ml_collections.ConfigDict()
+@dataclasses.dataclass(unsafe_hash=True)
+class Config:
+    dataset: str  # = "toy_regression"
 
-    config.dataset = "mnist"
+    learning_rate: float  # = 0.1
+    momentum: float  # = 0.9
 
-    config.learning_rate = 0.1
-    config.momentum = 0.9
+    num_epochs: int  # = 10
+    log_every_steps: int  # = 100
 
-    config.num_epochs = 10
-    config.log_every_steps = 100
+    train_val_perc: int  # = 80
+    batch_size: int  # = 128
+    cache: bool  # = True
+    shuffle_buffer_size: int  # = 1024
 
-    config.train_val_perc = 80
-    config.batch_size = 128
-    config.cache = True
-    config.shuffle_buffer_size = 1024
 
-    return config
+def get_config() -> Config:
+    return Config(
+        dataset="toy_regression",
+        learning_rate=0.1,
+        momentum=0.9,
+        num_epochs=10,
+        log_every_steps=100,
+        train_val_perc=80,
+        batch_size=128,
+        cache=True,
+        shuffle_buffer_size=1024,
+    )
 
 
 def metrics():

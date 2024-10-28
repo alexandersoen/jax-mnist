@@ -1,6 +1,10 @@
-import enum
-import tensorflow as tf
 import dataclasses
+import enum
+from typing import Callable, cast
+
+import tensorflow as tf
+
+from tensorflow_datasets.core import DatasetBuilder
 
 
 class DatasetPart(enum.Enum):
@@ -19,15 +23,32 @@ class DatasetSplit:
     num_examples_per_epoch: int
 
 
-def _process(sample):
+def image_process(sample):
     return {
-        "image": tf.cast(sample["image"], tf.float32) / 255.0,
+        "image": tf.math.divide(
+            tf.convert_to_tensor(sample["image"], tf.float32, dtype_hint=tf.Tensor),
+            255.0,
+        ),
         "label": sample["label"],
     }
 
 
+def image_splitter(part: DatasetPart, train_val_perc: int) -> str:
+    match part:
+        case DatasetPart.train:
+            split_str = f"train[:{train_val_perc}%]"
+        case DatasetPart.val:
+            split_str = f"train[{train_val_perc}%:]"
+        case DatasetPart.test:
+            split_str = "test"
+
+    return split_str
+
+
 def create_split(
-    dataset_builder,
+    dataset_builder: DatasetBuilder,
+    process: Callable[[dict], dict],
+    splitter: Callable[[DatasetPart, int], str],
     ds_part: DatasetPart | str,
     train_val_perc: int,
     batch_size: int,
@@ -38,6 +59,8 @@ def create_split(
 
     Args:
       dataset_builder: TODO
+      process: TODO
+      splitter: TODO
       train_val_perc: TODO
       batch_size: the batch size returned by the data pipeline.
       cache: Whether to cache the dataset.
@@ -48,25 +71,15 @@ def create_split(
     """
     assert 0 < train_val_perc <= 100
 
-    if type(ds_part) is str:
+    if isinstance(ds_part, str):
         ds_part = DatasetPart[ds_part.lower()]
 
-    match ds_part:
-        case DatasetPart.train:
-            split_str = f"train[:{train_val_perc}%]"
-        case DatasetPart.val:
-            split_str = f"train[{train_val_perc}%:]"
-        case DatasetPart.test:
-            split_str = "test"
-        case _:
-            raise ValueError(f"Unknown dataset part option: {ds_part}")
-
-    num_examples_per_epoch = dataset_builder.info.splits[
-        split_str
-    ].num_examples
+    split_str = splitter(ds_part, train_val_perc)
+    num_examples_per_epoch = dataset_builder.info.splits[split_str].num_examples
 
     ds = dataset_builder.as_dataset(split=split_str)
-    ds = ds.map(_process, tf.data.AUTOTUNE)
+    ds = cast(tf.data.Dataset, ds)
+    ds = ds.map(process, tf.data.AUTOTUNE)
 
     if cache:
         ds = ds.cache()

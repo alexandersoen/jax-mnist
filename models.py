@@ -1,5 +1,6 @@
-import flax.nnx as nnx
 from functools import partial
+
+import flax.nnx as nnx
 
 
 class CNN(nnx.Module):
@@ -29,9 +30,7 @@ class CNN(nnx.Module):
             rngs=rngs,
         )
 
-        self.avg_pool = partial(
-            nnx.avg_pool, window_shape=(2, 2), strides=(2, 2)
-        )
+        self.avg_pool = partial(nnx.avg_pool, window_shape=(2, 2), strides=(2, 2))
 
     def __call__(self, x):
         x = self.avg_pool(nnx.relu(self.conv1(x)))
