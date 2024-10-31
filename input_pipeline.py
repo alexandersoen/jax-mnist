@@ -54,7 +54,7 @@ def create_split(
     batch_size: int,
     cache: bool,
     shuffle_buffer_size: int | None,
-):
+) -> DatasetSplit:
     """Creates the MNIST train dataset using TensorFlow Datasets.
 
     Args:

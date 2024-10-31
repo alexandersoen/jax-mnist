@@ -18,12 +18,16 @@ This file is intentionally kept short. The majority of logic is in libraries
 than can be easily tested and imported in Colab.
 """
 
+import pathlib
+import typing
 import jax
 import tensorflow as tf
 import train
 from absl import app, flags, logging
 from clu import platform
 from ml_collections import config_flags
+
+from configs import Config
 
 FLAGS = flags.FLAGS
 
@@ -39,6 +43,19 @@ config_flags.DEFINE_config_file(
 def main(argv):
     if len(argv) > 1:
         raise app.UsageError("Too many command-line arguments.")
+
+    # Create work dir
+    workdir_path = pathlib.Path(FLAGS.workdir)
+    workdir_path.mkdir(parents=True, exist_ok=True)
+
+    # Log to file
+    _handler = logging.get_absl_handler()
+    _handler = typing.cast(logging.ABSLHandler, _handler)
+    _handler.use_absl_log_file(log_dir=FLAGS.workdir)
+
+    logging.set_stderrthreshold(logging.INFO)
+
+    print("Logging to: %s" % logging.get_log_file_name())
 
     # Hide any GPUs from TensorFlow. Otherwise TF might reserve memory and make
     # it unavailable to JAX.
@@ -57,7 +74,9 @@ def main(argv):
         platform.ArtifactType.DIRECTORY, FLAGS.workdir, "workdir"
     )
 
-    train.train_and_evaluate(FLAGS.config, FLAGS.workdir)
+    config: Config = FLAGS.config
+
+    train.train_and_evaluate(config, FLAGS.workdir)
 
 
 if __name__ == "__main__":

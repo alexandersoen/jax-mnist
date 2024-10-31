@@ -1,12 +1,13 @@
 from functools import partial
 
 import flax.nnx as nnx
+from jax import Array
 
 
 class CNN(nnx.Module):
     """A simple CNN model."""
 
-    def __init__(self, *, rngs: nnx.Rngs):
+    def __init__(self, *, rngs: nnx.Rngs) -> None:
         self.conv1 = nnx.Conv(
             in_features=1,
             out_features=32,
@@ -32,7 +33,7 @@ class CNN(nnx.Module):
 
         self.avg_pool = partial(nnx.avg_pool, window_shape=(2, 2), strides=(2, 2))
 
-    def __call__(self, x):
+    def __call__(self, x: Array) -> Array:
         x = self.avg_pool(nnx.relu(self.conv1(x)))
         x = self.avg_pool(nnx.relu(self.conv2(x)))
         x = x.reshape(x.shape[0], -1)  # flatten

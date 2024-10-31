@@ -23,6 +23,7 @@ The data is loaded using tensorflow_datasets.
 
 from typing import Any
 
+import models
 import optax
 import tensorflow as tf
 from absl import logging
@@ -31,14 +32,13 @@ from configs.default import Config
 from flax import nnx
 from flax.training import train_state
 from input_pipeline import create_split, image_process, image_splitter
-from models import CNN
 
 import tensorflow_datasets as tfds
 
 NUM_CLASSES = 10
 
 
-def create_train_state(model, config):
+def create_train_state(model: nnx.Module, config: Config) -> train_state.TrainState:
     """Creates initial `TrainState`."""
 
     graphdef, params = nnx.split(model, nnx.Param)
@@ -85,9 +85,8 @@ def val_step(state: train_state.TrainState, metrics: nnx.MultiMetric, batch):
     return metrics
 
 
-def log_summary(summary):
-
-    # Info record
+def log_summary(summary: dict[str, Any]) -> None:
+    # Summarize the scores as info
     logging.info(
         (
             "[train] ",
@@ -158,7 +157,10 @@ def train_and_evaluate(config: Config, workdir: str) -> train_state.TrainState:
 
     ###########################################################################
 
-    model = CNN(rngs=nnx.Rngs(0))
+    # Get corresponding model from config file
+    model: nnx.Module = getattr(models, config.model_config.object_class)(
+        **config.model_config.to_dict(), rngs=nnx.Rngs(0)
+    )
     state = create_train_state(model, config=config)
 
     ###########################################################################
@@ -168,6 +170,11 @@ def train_and_evaluate(config: Config, workdir: str) -> train_state.TrainState:
         loss=nnx.metrics.Average("loss"),
     )
     writer = metric_writers.create_default_writer(workdir)
+
+    ###########################################################################
+
+    # Record learning settings
+    writer.write_hparams(config.to_dict())
 
     ###########################################################################
 
