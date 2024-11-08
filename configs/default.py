@@ -32,7 +32,7 @@ def get_config() -> Config:
     model_config = CNNModelConfig()
 
     return Config(
-        dataset="toy_regression",
+        dataset="mnist",
         model_config=model_config,
         learning_rate=0.1,
         momentum=0.9,

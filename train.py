@@ -125,6 +125,7 @@ def train_and_evaluate(config: Config, workdir: str) -> train_state.TrainState:
     ###########################################################################
 
     dataset_builder = tfds.builder(config.dataset)
+    dataset_builder.download_and_prepare()
     train_split = create_split(
         dataset_builder,
         image_process,

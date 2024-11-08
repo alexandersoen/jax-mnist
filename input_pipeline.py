@@ -25,10 +25,7 @@ class DatasetSplit:
 
 def image_process(sample):
     return {
-        "image": tf.math.divide(
-            tf.convert_to_tensor(sample["image"], tf.float32, dtype_hint=tf.Tensor),
-            255.0,
-        ),
+        "image": tf.divide(tf.cast(sample["image"], tf.float32), 255.0),
         "label": sample["label"],
     }
 
