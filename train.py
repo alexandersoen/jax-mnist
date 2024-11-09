@@ -41,10 +41,27 @@ from input_pipeline import create_split, gen_image_processer
 NUM_CLASSES = 10
 
 
-def create_train_state(
-    model: nnx.Module, config: TrainConfig
-) -> train_state.TrainState:
+def create_checkpoint_manager(
+    workdir: pathlib.Path, config: TrainConfig
+) -> ocp.CheckpointManager:
+
+    options = ocp.CheckpointManagerOptions(
+        max_to_keep=config.checkpoint_max_keep, create=True, step_prefix="checkpoint"
+    )
+    orbax_checkpointer = ocp.StandardCheckpointer()
+    checkpoint_manager = ocp.CheckpointManager(
+        workdir.resolve(), orbax_checkpointer, options
+    )
+
+    return checkpoint_manager
+
+
+def create_train_state(config: TrainConfig) -> train_state.TrainState:
     """Creates initial `TrainState`."""
+
+    model: nnx.Module = getattr(models, config.model_config.object_class)(
+        **config.model_config.to_params(), rngs=nnx.Rngs(0)
+    )
 
     graphdef, params = nnx.split(model, nnx.Param)
     tx = optax.sgd(config.learning_rate, config.momentum)
@@ -170,10 +187,7 @@ def train_and_evaluate(
     ###########################################################################
 
     # Get corresponding model from config file
-    model: nnx.Module = getattr(models, config.model_config.object_class)(
-        **config.model_config.to_params(), rngs=nnx.Rngs(0)
-    )
-    state = create_train_state(model, config=config)
+    state = create_train_state(config=config)
 
     ###########################################################################
 
@@ -194,15 +208,8 @@ def train_and_evaluate(
     )
 
     ###########################################################################
-    options = ocp.CheckpointManagerOptions(
-        max_to_keep=config.checkpoint_max_keep, create=True, step_prefix="checkpoint"
-    )
-    orbax_checkpointer = ocp.StandardCheckpointer()
-    checkpoint_manager = ocp.CheckpointManager(
-        workdir.resolve(), orbax_checkpointer, options
-    )
 
-    save_args = orbax_utils.save_args_from_target(state)
+    checkpoint_manager = create_checkpoint_manager(workdir, config)
 
     ###########################################################################
 
@@ -254,7 +261,8 @@ def train_and_evaluate(
                 logging.info("Saving checkpoint step %d.", step)
                 with report_progress.timed("checkpoint"):
                     checkpoint_manager.save(
-                        step, state, save_kwargs={"save_args": save_args}
+                        step,
+                        args=ocp.args.StandardSave(state),  # pyright: ignore
                     )
 
         checkpoint_manager.wait_until_finished()
