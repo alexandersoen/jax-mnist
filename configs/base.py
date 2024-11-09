@@ -1,5 +1,5 @@
-from abc import ABC, abstractmethod
 import dataclasses
+from abc import ABC, abstractmethod
 from typing import Any
 
 
@@ -11,8 +11,13 @@ class ObjectConfig(ABC):
     def object_class(self) -> str:
         pass
 
-    def to_dict(self) -> dict[str, Any]:
+    def to_params(self) -> dict[str, Any]:
         return dataclasses.asdict(self)
+
+    def to_dict(self) -> dict[str, Any]:
+        param_dict = self.to_params()
+        param_dict["object_class"] = self.object_class
+        return param_dict
 
 
 @dataclasses.dataclass(unsafe_hash=True)

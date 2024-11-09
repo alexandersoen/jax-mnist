@@ -22,10 +22,10 @@ def create_split(
     dataset_builder: DatasetBuilder,
     ds_part: str,
     process: Callable[[dict], dict],
-    shuffle: bool,
     batch_size: int,
     cache: bool,
     shuffle_buffer_size: int | None,
+    shuffle: bool = True,
     repeat: bool = True,
 ) -> DatasetSplit:
     """Creates the MNIST train dataset using TensorFlow Datasets.

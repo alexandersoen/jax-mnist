@@ -131,19 +131,21 @@ def train_and_evaluate(config: Config, workdir: pathlib.Path) -> train_state.Tra
         dataset_builder,
         ds_part="train",
         process=image_process,
-        shuffle=True,
         batch_size=config.batch_size,
         cache=config.cache,
         shuffle_buffer_size=config.shuffle_buffer_size,
+        shuffle=True,
+        repeat=True,
     )
     test_split = create_split(
         dataset_builder,
         ds_part="test",
         process=image_process,
-        shuffle=False,
         batch_size=config.batch_size,
         cache=config.cache,
         shuffle_buffer_size=None,
+        shuffle=False,
+        repeat=False,
     )
 
     ###########################################################################
