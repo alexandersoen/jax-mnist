@@ -21,6 +21,7 @@ The data is loaded using tensorflow_datasets.
 # See issue #620.
 # pytype: disable=wrong-keyword-args
 
+import pathlib
 from typing import Any
 
 import optax
@@ -89,26 +90,26 @@ def log_summary(summary: dict[str, Any]) -> None:
     # Summarize the scores as info
     logging.info(
         (
-            "[train] ",
+            "[train] "
             f"epoch: {summary['epoch']}, "
             f"step: {summary['step']}, "
             f"loss: {summary['train_loss']}, "
-            f"accuracy: {summary['train_accuracy']}",
+            f"accuracy: {summary['train_accuracy']}"
         )
     )
 
     logging.info(
         (
-            "[test] ",
+            "[test] "
             f"epoch: {summary['epoch']}, "
             f"step: {summary['step']}, "
             f"loss: {summary['test_loss']}, "
-            f"accuracy: {summary['test_accuracy']}",
+            f"accuracy: {summary['test_accuracy']}"
         )
     )
 
 
-def train_and_evaluate(config: Config, workdir: str) -> train_state.TrainState:
+def train_and_evaluate(config: Config, workdir: pathlib.Path) -> train_state.TrainState:
     """Execute model training and evaluation loop.
 
     Args:

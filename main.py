@@ -41,18 +41,22 @@ config_flags.DEFINE_config_file(
 )
 
 
+def gen_subdir(workdir: pathlib.Path, config: Config) -> pathlib.Path:
+    return pathlib.Path(workdir, config.dataset)
+
+
 def main(argv):
     if len(argv) > 1:
         raise app.UsageError("Too many command-line arguments.")
 
     # Create work dir
-    workdir_path = pathlib.Path(FLAGS.workdir)
+    workdir_path = gen_subdir(FLAGS.workdir, FLAGS.config)
     workdir_path.mkdir(parents=True, exist_ok=True)
 
     # Log to file
     _handler = logging.get_absl_handler()
     _handler = typing.cast(logging.ABSLHandler, _handler)
-    _handler.use_absl_log_file(log_dir=FLAGS.workdir)
+    _handler.use_absl_log_file(log_dir=str(workdir_path))
 
     logging.set_stderrthreshold(logging.INFO)
 
@@ -72,12 +76,11 @@ def main(argv):
         f"process_count: {jax.process_count()}"
     )
     platform.work_unit().create_artifact(
-        platform.ArtifactType.DIRECTORY, FLAGS.workdir, "workdir"
+        platform.ArtifactType.DIRECTORY, workdir_path, "workdir"
     )
 
     config: Config = FLAGS.config
-
-    train.train_and_evaluate(config, FLAGS.workdir)
+    train.train_and_evaluate(config, workdir_path)
 
 
 if __name__ == "__main__":
