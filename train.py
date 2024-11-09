@@ -30,7 +30,8 @@ import tensorflow_datasets as tfds
 from absl import logging
 from clu import metric_writers, periodic_actions
 from flax import nnx
-from flax.training import train_state, checkpoints
+from flax.training import train_state, orbax_utils
+import orbax.checkpoint as ocp
 
 
 import models
@@ -193,6 +194,17 @@ def train_and_evaluate(
     )
 
     ###########################################################################
+    options = ocp.CheckpointManagerOptions(
+        max_to_keep=config.checkpoint_max_keep, create=True, step_prefix="checkpoint"
+    )
+    orbax_checkpointer = ocp.StandardCheckpointer()
+    checkpoint_manager = ocp.CheckpointManager(
+        workdir.resolve(), orbax_checkpointer, options
+    )
+
+    save_args = orbax_utils.save_args_from_target(state)
+
+    ###########################################################################
 
     with metric_writers.ensure_flushes(writer):
         for step, batch in zip(range(num_train_steps), train_ds.as_numpy_iterator()):
@@ -241,12 +253,11 @@ def train_and_evaluate(
             if (config.checkpoint_every_steps > 0) and save_checkpoint:
                 logging.info("Saving checkpoint step %d.", step)
                 with report_progress.timed("checkpoint"):
-                    checkpoints.save_checkpoint_multiprocess(
-                        workdir.resolve(),
-                        state,
-                        step,
-                        keep=config.checkpoint_max_keep,
+                    checkpoint_manager.save(
+                        step, state, save_kwargs={"save_args": save_args}
                     )
+
+        checkpoint_manager.wait_until_finished()
 
         ###########################################################################
 
