@@ -4,6 +4,8 @@ from typing import Callable, cast
 import tensorflow as tf
 from tensorflow_datasets.core import DatasetBuilder
 
+Processer = Callable[[dict], dict]
+
 
 @dataclasses.dataclass
 class DatasetSplit:
@@ -11,17 +13,10 @@ class DatasetSplit:
     num_examples_per_epoch: int
 
 
-def image_process(sample):
-    return {
-        "image": tf.divide(tf.cast(sample["image"], tf.float32), 255.0),
-        "label": sample["label"],
-    }
-
-
 def create_split(
     dataset_builder: DatasetBuilder,
     ds_part: str,
-    process: Callable[[dict], dict],
+    process: Processer,
     batch_size: int,
     cache: bool,
     shuffle_buffer_size: int | None,
@@ -61,3 +56,14 @@ def create_split(
     ds = ds.prefetch(buffer_size=tf.data.AUTOTUNE)
 
     return DatasetSplit(ds, num_examples_per_epoch)
+
+
+def gen_image_processer(input_str: str, target_str: str) -> Processer:
+
+    def process(sample: dict) -> dict:
+        return {
+            "image": tf.divide(tf.cast(sample[input_str], tf.float32), 255.0),
+            "label": sample[target_str],
+        }
+
+    return process

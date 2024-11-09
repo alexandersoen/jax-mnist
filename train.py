@@ -28,18 +28,21 @@ import optax
 import tensorflow as tf
 import tensorflow_datasets as tfds
 from absl import logging
-from clu import metric_writers
+from clu import metric_writers, periodic_actions
 from flax import nnx
-from flax.training import train_state
+from flax.training import train_state, checkpoints
+
 
 import models
-from configs.default import Config
-from input_pipeline import create_split, image_process
+from configs.default import TrainConfig
+from input_pipeline import create_split, gen_image_processer
 
 NUM_CLASSES = 10
 
 
-def create_train_state(model: nnx.Module, config: Config) -> train_state.TrainState:
+def create_train_state(
+    model: nnx.Module, config: TrainConfig
+) -> train_state.TrainState:
     """Creates initial `TrainState`."""
 
     graphdef, params = nnx.split(model, nnx.Param)
@@ -109,7 +112,9 @@ def log_summary(summary: dict[str, Any]) -> None:
     )
 
 
-def train_and_evaluate(config: Config, workdir: pathlib.Path) -> train_state.TrainState:
+def train_and_evaluate(
+    config: TrainConfig, workdir: pathlib.Path
+) -> train_state.TrainState:
     """Execute model training and evaluation loop.
 
     Args:
@@ -125,11 +130,15 @@ def train_and_evaluate(config: Config, workdir: pathlib.Path) -> train_state.Tra
 
     ###########################################################################
 
-    dataset_builder = tfds.builder(config.dataset)
+    dataset_builder = tfds.builder(config.dataset_config.name)
     dataset_builder.download_and_prepare()
+
+    image_process = gen_image_processer(
+        config.dataset_config.input_key, config.dataset_config.target_key
+    )
     train_split = create_split(
         dataset_builder,
-        ds_part="train",
+        ds_part=config.dataset_config.train_partition,
         process=image_process,
         batch_size=config.batch_size,
         cache=config.cache,
@@ -139,7 +148,7 @@ def train_and_evaluate(config: Config, workdir: pathlib.Path) -> train_state.Tra
     )
     test_split = create_split(
         dataset_builder,
-        ds_part="test",
+        ds_part=config.dataset_config.test_partition,
         process=image_process,
         batch_size=config.batch_size,
         cache=config.cache,
@@ -161,7 +170,7 @@ def train_and_evaluate(config: Config, workdir: pathlib.Path) -> train_state.Tra
 
     # Get corresponding model from config file
     model: nnx.Module = getattr(models, config.model_config.object_class)(
-        **config.model_config.to_dict(), rngs=nnx.Rngs(0)
+        **config.model_config.to_params(), rngs=nnx.Rngs(0)
     )
     state = create_train_state(model, config=config)
 
@@ -171,47 +180,74 @@ def train_and_evaluate(config: Config, workdir: pathlib.Path) -> train_state.Tra
         accuracy=nnx.metrics.Accuracy(),
         loss=nnx.metrics.Average("loss"),
     )
-    writer = metric_writers.create_default_writer(workdir)
 
     ###########################################################################
+
+    # Define writer + similar objects
+    writer = metric_writers.create_default_writer(workdir)
 
     # Record learning settings
     writer.write_hparams(config.to_dict())
+    report_progress = periodic_actions.ReportProgress(
+        num_train_steps=num_train_steps, writer=writer
+    )
 
     ###########################################################################
 
-    for step, batch in zip(range(num_train_steps), train_ds.as_numpy_iterator()):
+    with metric_writers.ensure_flushes(writer):
+        for step, batch in zip(range(num_train_steps), train_ds.as_numpy_iterator()):
+            is_last_step = step == num_train_steps - 1
 
-        # Train step
-        state, metrics = train_step(state, metrics, batch)
+            ###########################################################################
 
-        # Check for logging
-        if (step % config.log_every_steps == 0) or (step == num_train_steps - 1):
-            epoch = step // train_steps_per_epoch
-            summary: dict[str, Any] = {"epoch": epoch, "step": step}
+            # Train step
+            state, metrics = train_step(state, metrics, batch)
+            report_progress(step)
 
-            # Process train stats
-            for metric, value in metrics.compute().items():
-                summary[f"train_{metric}"] = value
-            metrics.reset()
+            ###########################################################################
 
-            # Process test stats
-            for _, test_batch in zip(
-                range(num_test_steps), test_ds.as_numpy_iterator()
-            ):
-                metrics = test_step(state, metrics, test_batch)
+            # Check for logging
+            if (step % config.log_every_steps == 0) or is_last_step:
+                # epoch = step // train_steps_per_epoch
+                # summary: dict[str, Any] = {"epoch": epoch, "step": step}
 
-            for metric, value in metrics.compute().items():
-                summary[f"test_{metric}"] = value
-            metrics.reset()
+                # Process train stats
+                with report_progress.timed("train_metrics"):
+                    train_summary: dict[str, Any] = {}
 
-            # Record data into writer
-            writer.write_scalars(step, summary)
-            writer.flush()
+                    for metric, value in metrics.compute().items():
+                        train_summary[f"train_{metric}"] = value
 
-            # Info record
-            log_summary(summary)
+                    writer.write_scalars(step, train_summary)
+                    metrics.reset()
 
-    ###########################################################################
+                # Process test stats
+                with report_progress.timed("test_metrics"):
+                    test_summary: dict[str, Any] = {}
 
-    return state
+                    for _, test_batch in zip(
+                        range(num_test_steps), test_ds.as_numpy_iterator()
+                    ):
+                        metrics = test_step(state, metrics, test_batch)
+
+                    for metric, value in metrics.compute().items():
+                        test_summary[f"test_{metric}"] = value
+
+                    writer.write_scalars(step, test_summary)
+                    metrics.reset()
+
+            # Save a checkpoint on one host after every checkpoint_freq steps.
+            save_checkpoint = step % config.checkpoint_every_steps == 0 or is_last_step
+            if (config.checkpoint_every_steps > 0) and save_checkpoint:
+                logging.info("Saving checkpoint step %d.", step)
+                with report_progress.timed("checkpoint"):
+                    checkpoints.save_checkpoint_multiprocess(
+                        workdir.resolve(),
+                        state,
+                        step,
+                        keep=config.checkpoint_max_keep,
+                    )
+
+        ###########################################################################
+
+        return state

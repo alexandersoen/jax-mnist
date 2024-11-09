@@ -16,8 +16,21 @@
 
 
 import dataclasses
-from configs.base import Config, ModelConfig
+from configs.base import DatasetConfig, ModelConfig, TrainConfig
 from models import CNN
+
+
+@dataclasses.dataclass(unsafe_hash=True)
+class MNISTConfig(DatasetConfig):
+    name: str = "mnist"
+
+    # Dictionary keys for access data
+    input_key: str = "image"
+    target_key: str = "label"
+
+    # Partitions in builder
+    train_partition: str = "train"
+    test_partition: str = "test"
 
 
 @dataclasses.dataclass(unsafe_hash=True)
@@ -28,11 +41,12 @@ class CNNModelConfig(ModelConfig):
         return CNN.__name__
 
 
-def get_config() -> Config:
+def get_config() -> TrainConfig:
+    dataset_config = MNISTConfig()
     model_config = CNNModelConfig()
 
-    return Config(
-        dataset="mnist",
+    return TrainConfig(
+        dataset_config=dataset_config,
         model_config=model_config,
         learning_rate=0.1,
         momentum=0.9,
@@ -41,6 +55,8 @@ def get_config() -> Config:
         batch_size=128,
         cache=True,
         shuffle_buffer_size=1024,
+        checkpoint_every_steps=100,
+        checkpoint_max_keep=5,
     )
 
 

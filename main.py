@@ -28,7 +28,7 @@ from clu import platform
 from ml_collections import config_flags
 
 import train
-from configs import Config
+from configs import TrainConfig
 
 FLAGS = flags.FLAGS
 
@@ -41,8 +41,8 @@ config_flags.DEFINE_config_file(
 )
 
 
-def gen_subdir(workdir: pathlib.Path, config: Config) -> pathlib.Path:
-    return pathlib.Path(workdir, config.dataset)
+def gen_subdir(workdir: pathlib.Path, config: TrainConfig) -> pathlib.Path:
+    return pathlib.Path(workdir, config.dataset_config.name)
 
 
 def main(argv):
@@ -79,7 +79,7 @@ def main(argv):
         platform.ArtifactType.DIRECTORY, workdir_path, "workdir"
     )
 
-    config: Config = FLAGS.config
+    config: TrainConfig = FLAGS.config
     train.train_and_evaluate(config, workdir_path)
 
 
