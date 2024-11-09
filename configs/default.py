@@ -38,7 +38,6 @@ def get_config() -> Config:
         momentum=0.9,
         num_epochs=10,
         log_every_steps=100,
-        train_val_perc=80,
         batch_size=128,
         cache=True,
         shuffle_buffer_size=1024,

@@ -1,20 +1,8 @@
 import dataclasses
-import enum
 from typing import Callable, cast
 
 import tensorflow as tf
-
 from tensorflow_datasets.core import DatasetBuilder
-
-
-class DatasetPart(enum.Enum):
-    """
-    Simple Enum class to specify dataset portion.
-    """
-
-    train = enum.auto()
-    val = enum.auto()
-    test = enum.auto()
 
 
 @dataclasses.dataclass
@@ -30,35 +18,21 @@ def image_process(sample):
     }
 
 
-def image_splitter(part: DatasetPart, train_val_perc: int) -> str:
-    match part:
-        case DatasetPart.train:
-            split_str = f"train[:{train_val_perc}%]"
-        case DatasetPart.val:
-            split_str = f"train[{train_val_perc}%:]"
-        case DatasetPart.test:
-            split_str = "test"
-
-    return split_str
-
-
 def create_split(
     dataset_builder: DatasetBuilder,
+    ds_part: str,
     process: Callable[[dict], dict],
-    splitter: Callable[[DatasetPart, int], str],
-    ds_part: DatasetPart | str,
-    train_val_perc: int,
+    shuffle: bool,
     batch_size: int,
     cache: bool,
     shuffle_buffer_size: int | None,
+    repeat: bool = True,
 ) -> DatasetSplit:
     """Creates the MNIST train dataset using TensorFlow Datasets.
 
     Args:
       dataset_builder: TODO
       process: TODO
-      splitter: TODO
-      train_val_perc: TODO
       batch_size: the batch size returned by the data pipeline.
       cache: Whether to cache the dataset.
       shuffle_buffer_size: Size of the shuffle buffer.
@@ -66,15 +40,9 @@ def create_split(
     Returns:
       A `tf.data.Dataset`.
     """
-    assert 0 < train_val_perc <= 100
+    num_examples_per_epoch = dataset_builder.info.splits[ds_part].num_examples
 
-    if isinstance(ds_part, str):
-        ds_part = DatasetPart[ds_part.lower()]
-
-    split_str = splitter(ds_part, train_val_perc)
-    num_examples_per_epoch = dataset_builder.info.splits[split_str].num_examples
-
-    ds = dataset_builder.as_dataset(split=split_str)
+    ds = dataset_builder.as_dataset(split=ds_part)
     ds = cast(tf.data.Dataset, ds)
     ds = ds.map(process, tf.data.AUTOTUNE)
 
@@ -82,13 +50,12 @@ def create_split(
         ds = ds.cache()
         ds = ds.take(num_examples_per_epoch)
 
-    if ds_part == DatasetPart.train:
-        ds = ds.repeat()
+    if shuffle:
         ds = ds.shuffle(shuffle_buffer_size)
 
     ds = ds.batch(batch_size, drop_remainder=True)
 
-    if ds_part != DatasetPart.train:
+    if repeat:
         ds = ds.repeat()
 
     ds = ds.prefetch(buffer_size=tf.data.AUTOTUNE)

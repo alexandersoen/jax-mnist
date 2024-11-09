@@ -20,13 +20,14 @@ than can be easily tested and imported in Colab.
 
 import pathlib
 import typing
+
 import jax
 import tensorflow as tf
-import train
 from absl import app, flags, logging
 from clu import platform
 from ml_collections import config_flags
 
+import train
 from configs import Config
 
 FLAGS = flags.FLAGS

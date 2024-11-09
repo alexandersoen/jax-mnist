@@ -22,20 +22,19 @@ class ModelConfig(ObjectConfig):
 
 @dataclasses.dataclass(unsafe_hash=True)
 class Config:
-    dataset: str  # = "toy_regression"
+    dataset: str
 
     model_config: ModelConfig
 
-    learning_rate: float  # = 0.1
-    momentum: float  # = 0.9
+    learning_rate: float
+    momentum: float
 
-    num_epochs: int  # = 10
-    log_every_steps: int  # = 100
+    num_epochs: int
+    log_every_steps: int
 
-    train_val_perc: int  # = 80
-    batch_size: int  # = 128
-    cache: bool  # = True
-    shuffle_buffer_size: int  # = 1024
+    batch_size: int
+    cache: bool
+    shuffle_buffer_size: int
 
     def to_dict(self) -> dict[str, Any]:
         config_dict = dataclasses.asdict(self)

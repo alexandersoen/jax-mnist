@@ -23,17 +23,17 @@ The data is loaded using tensorflow_datasets.
 
 from typing import Any
 
-import models
 import optax
 import tensorflow as tf
+import tensorflow_datasets as tfds
 from absl import logging
 from clu import metric_writers
-from configs.default import Config
 from flax import nnx
 from flax.training import train_state
-from input_pipeline import create_split, image_process, image_splitter
 
-import tensorflow_datasets as tfds
+import models
+from configs.default import Config
+from input_pipeline import create_split, image_process
 
 NUM_CLASSES = 10
 
@@ -74,7 +74,7 @@ def train_step(state: train_state.TrainState, metrics: nnx.MultiMetric, batch):
 
 
 @nnx.jit
-def val_step(state: train_state.TrainState, metrics: nnx.MultiMetric, batch):
+def test_step(state: train_state.TrainState, metrics: nnx.MultiMetric, batch):
     inputs = batch["image"]
     labels = batch["label"]
 
@@ -99,11 +99,11 @@ def log_summary(summary: dict[str, Any]) -> None:
 
     logging.info(
         (
-            "[val] ",
+            "[test] ",
             f"epoch: {summary['epoch']}, "
             f"step: {summary['step']}, "
-            f"loss: {summary['val_loss']}, "
-            f"accuracy: {summary['val_accuracy']}",
+            f"loss: {summary['test_loss']}, "
+            f"accuracy: {summary['test_accuracy']}",
         )
     )
 
@@ -128,20 +128,18 @@ def train_and_evaluate(config: Config, workdir: str) -> train_state.TrainState:
     dataset_builder.download_and_prepare()
     train_split = create_split(
         dataset_builder,
-        image_process,
-        image_splitter,
         ds_part="train",
-        train_val_perc=config.train_val_perc,
+        process=image_process,
+        shuffle=True,
         batch_size=config.batch_size,
         cache=config.cache,
         shuffle_buffer_size=config.shuffle_buffer_size,
     )
-    val_split = create_split(
+    test_split = create_split(
         dataset_builder,
-        image_process,
-        image_splitter,
-        ds_part="val",
-        train_val_perc=config.train_val_perc,
+        ds_part="test",
+        process=image_process,
+        shuffle=False,
         batch_size=config.batch_size,
         cache=config.cache,
         shuffle_buffer_size=None,
@@ -150,11 +148,11 @@ def train_and_evaluate(config: Config, workdir: str) -> train_state.TrainState:
     ###########################################################################
     # Calculate number of steps for each of these
     train_ds = train_split.ds
-    val_ds = val_split.ds
+    test_ds = test_split.ds
 
     train_steps_per_epoch = train_split.num_examples_per_epoch // config.batch_size
     num_train_steps = config.num_epochs * train_steps_per_epoch
-    num_val_steps = val_split.num_examples_per_epoch // config.batch_size
+    num_test_steps = test_split.num_examples_per_epoch // config.batch_size
 
     ###########################################################################
 
@@ -194,12 +192,14 @@ def train_and_evaluate(config: Config, workdir: str) -> train_state.TrainState:
                 summary[f"train_{metric}"] = value
             metrics.reset()
 
-            # Process val stats
-            for _, val_batch in zip(range(num_val_steps), val_ds.as_numpy_iterator()):
-                metrics = val_step(state, metrics, val_batch)
+            # Process test stats
+            for _, test_batch in zip(
+                range(num_test_steps), test_ds.as_numpy_iterator()
+            ):
+                metrics = test_step(state, metrics, test_batch)
 
             for metric, value in metrics.compute().items():
-                summary[f"val_{metric}"] = value
+                summary[f"test_{metric}"] = value
             metrics.reset()
 
             # Record data into writer
